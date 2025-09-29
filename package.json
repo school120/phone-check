@@ -2,7 +2,7 @@
   "name": "phone-check",
   "version": "1.0.0",
   "private": true,
-  "homepage": "https://<your-username>.github.io/phone-check",
+  "homepage": "https://school120.github.io/phone-check",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
