@@ -28,6 +28,11 @@ jobs:
         with:
           node-version: 18
 
+      # 🔧 Pin webpack validator deps that CRA 5 expects
+      - name: Install (pin schema-utils/ajv/ajv-keywords)
+        run: |
+          npm install --no-save schema-utils@3.3.0 ajv@6.12.6 ajv-keywords@3.5.2
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
