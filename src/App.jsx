@@ -118,8 +118,7 @@ export default function App() {
   const overlayRef = useRef(null);
 
   const [profiles, setProfiles] = useState({});
-
-  // Load roster from PUBLIC_URL (CRA) with manual upload fallback
+  
   useEffect(() => {
     (async () => {
       try {
