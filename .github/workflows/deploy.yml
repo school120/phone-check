@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]  # <- change to master if your default branch is master
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -18,27 +18,33 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      # No lockfile required; avoids npm ci error
+      - name: Clean install (remove lock + modules)
+        run: |
+          rm -f package-lock.json
+          rm -rf node_modules
+          npm cache clean --force
+
       - name: Install deps
         run: npm install --legacy-peer-deps
+
+      - name: Verify versions
+        run: |
+          npx npm-which npm >/dev/null 2>&1 || true
+          npm ls schema-utils ajv ajv-formats ajv-keywords || true
 
       - name: Build
         run: npm run build
 
-      # React SPA fallback to avoid GitHub’s 404 page
-      - name: Add SPA 404 fallback
+      - name: SPA 404 fallback
         run: cp build/index.html build/404.html
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: build
 
@@ -49,6 +55,5 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4
