@@ -39,7 +39,6 @@ const COLS = 12;
 const LS_KEY = "deviceProfiles.v1";
 
 // ---------- Helpers ----------
-/** If SM1/SM2 → "SM1-<slot>", else "<grade><box><slot>" */
 function buildSecurityNumber(grade: number, box: string, slot: number) {
   const b = box.toUpperCase();
   if (b === "SM1" || b === "SM2") return `${b}-${slot}`;
@@ -114,7 +113,7 @@ function otsuThreshold(grayHist: number[], total: number) {
   }
   return threshold;
 }
-// Profiles (persisted baselines)
+// Profiles
 function loadProfiles(): Record<string, DeviceProfile> {
   try {
     const raw = localStorage.getItem(LS_KEY);
@@ -156,10 +155,9 @@ export default function App() {
   const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);    // hidden for processing
   const overlayRef = useRef<HTMLCanvasElement | null>(null);       // visible overlay
 
-  // Learned profiles (persist across scans); only learned from real pictures.
   const [profiles, setProfiles] = useState<Record<string, DeviceProfile>>({});
 
-  // -------- Load roster + profiles --------
+  // -------- Load roster from PUBLIC_URL; show fallback uploader on failure --------
   useEffect(() => {
     (async () => {
       try {
@@ -179,13 +177,34 @@ export default function App() {
         setRosterError(null);
       } catch (e) {
         console.error("Failed to load roster:", e);
-        setRosterError("Couldn't load roster.xlsx from /public. Make sure the file exists in the repo.");
+        setRosterError("Couldn't load roster.xlsx from /public. You can upload it below.");
       }
       setProfiles(loadProfiles());
     })();
   }, []);
 
-  // -------- Grid Overlay Drawer (visible) --------
+  // Manual roster upload fallback
+  const onRosterUpload = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      const normalized: RosterRow[] = json.map((r) => ({
+        personId: String(r["Person ID"] ?? ""),
+        fullName: String(r["Full Name"] ?? ""),
+        securityNumber: String(r["Security Number"] ?? "").toUpperCase().trim(),
+        currentGrade: String(r["Current Grade"] ?? ""),
+      }));
+      setRoster(normalized);
+      setRosterError(null);
+    } catch {
+      setRosterError("Roster upload failed. Make sure columns are: Person ID, Full Name, Security Number, Current Grade.");
+    }
+  };
+
+  // -------- Grid Overlay (visible) --------
   const drawOverlay = () => {
     const img = imgRef.current;
     const overlay = overlayRef.current;
@@ -379,7 +398,6 @@ export default function App() {
     });
 
     // Auto-learn baseline ONLY from this real photo for students without a baseline:
-    // If assigned AND present AND no existing expected color → save detected color as baseline.
     const updatedProfiles: Record<string, DeviceProfile> = { ...prior };
     for (const r of joined) {
       if (r.fullName && r.phonePresent && !updatedProfiles[r.securityNumber]) {
@@ -393,7 +411,6 @@ export default function App() {
     if (Object.keys(updatedProfiles).length !== Object.keys(prior).length) {
       setProfiles(updatedProfiles);
       saveProfiles(updatedProfiles);
-      // reflect expectedColor in current table
       for (const r of joined) {
         if (!r.expectedColor && updatedProfiles[r.securityNumber]) {
           r.expectedColor = updatedProfiles[r.securityNumber].color;
@@ -404,8 +421,7 @@ export default function App() {
     setResults(joined);
   };
 
-  // Export / Import baselines (to sync across devices if needed)
-  const [importing, setImporting] = useState<File | null>(null);
+  // Export / Import baselines
   const exportProfiles = () => downloadJSON("device-profiles.json", Object.values(profiles));
   const importProfiles = async (file: File | null) => {
     if (!file) return;
@@ -420,7 +436,6 @@ export default function App() {
       }
       setProfiles(map);
       saveProfiles(map);
-      // refresh expectedColor in current results
       if (results) {
         const next = results.map(r => {
           const expected = map[r.securityNumber]?.color ?? null;
@@ -433,8 +448,6 @@ export default function App() {
       }
     } catch {
       alert("Invalid device-profiles.json");
-    } finally {
-      setImporting(null);
     }
   };
 
@@ -449,26 +462,28 @@ export default function App() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold">Phone Check – One Box (Grades 9–12, A–F + SM1/SM2)</h1>
       <p className="text-sm text-gray-600">
-        Grades are limited to 9–12. Phone color is learned from each real photo; mismatches are flagged as <b>Suspicious</b>.
+        If the roster file can’t be loaded from the site, upload it below. Colors are learned from the current photo; mismatches are flagged as <b>Suspicious</b>.
       </p>
 
       {rosterError && (
-        <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{rosterError}</div>
+        <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm mb-2">
+          {rosterError}
+        </div>
       )}
 
-      {/* Profiles toolbar */}
-      <div className="flex flex-wrap gap-2 items-center">
+      {/* Roster uploader fallback */}
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="px-3 py-1.5 rounded bg-gray-100 border cursor-pointer">
+          Upload roster.xlsx
+          <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => onRosterUpload(e.target.files?.[0] ?? null)} />
+        </label>
+
+        {/* Profiles toolbar */}
         <button className="px-3 py-1.5 rounded bg-gray-100 border" onClick={exportProfiles}>Export Profiles</button>
         <label className="px-3 py-1.5 rounded bg-gray-100 border cursor-pointer">
           Import Profiles
-          <input
-            type="file"
-            accept="application/json"
-            onChange={(e) => importProfiles(e.target.files?.[0] ?? null)}
-            className="hidden"
-          />
+          <input type="file" accept="application/json" onChange={(e) => importProfiles(e.target.files?.[0] ?? null)} className="hidden" />
         </label>
-        <span className="text-xs text-gray-500">Baselines persist locally; export to sync or back up.</span>
       </div>
 
       {/* Controls */}
