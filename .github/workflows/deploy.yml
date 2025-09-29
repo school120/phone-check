@@ -1,59 +1,25 @@
-name: Deploy to GitHub Pages
+- uses: actions/checkout@v4
+- uses: actions/setup-node@v4
+  with:
+    node-version: 18
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+- name: Clean install
+  run: |
+    rm -f package-lock.json
+    rm -rf node_modules tsconfig.json src/react-app-env.d.ts
+    find src -type f \( -name "*.ts" -o -name "*.tsx" \) -delete
+    npm cache clean --force
+    npm install
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+- name: Verify ajv versions
+  run: npm ls ajv ajv-keywords schema-utils || true
 
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
+- name: Build
+  run: npm run build
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+- name: SPA 404 fallback
+  run: cp build/index.html build/404.html
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-
-      - name: Clean install (remove lock + modules)
-        run: |
-          rm -f package-lock.json
-          rm -rf node_modules
-          npm cache clean --force
-
-      - name: Install deps
-        run: npm install --legacy-peer-deps
-
-      - name: Verify versions
-        run: |
-          npx npm-which npm >/dev/null 2>&1 || true
-          npm ls schema-utils ajv ajv-formats ajv-keywords || true
-
-      - name: Build
-        run: npm run build
-
-      - name: SPA 404 fallback
-        run: cp build/index.html build/404.html
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: build
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+- uses: actions/upload-pages-artifact@v3
+  with:
+    path: build
