@@ -8,12 +8,8 @@
     "react-dom": "^18.3.1",
     "react-scripts": "5.0.1",
     "xlsx": "^0.18.5",
-
-    // ✅ force legacy Ajv versions that CRA 5 toolchain expects
     "ajv": "6.12.6",
     "ajv-keywords": "3.5.2",
-
-    // TypeScript stack (since you have .tsx files)
     "typescript": "4.9.5",
     "@types/react": "^18.2.79",
     "@types/react-dom": "^18.2.25"
@@ -30,6 +26,10 @@
   },
   "browserslist": {
     "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   }
 }
