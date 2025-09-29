@@ -1,8 +1,7 @@
-import React from "react";
-import { createRoot } from "react-dom/client";
-import "./index.css";
-import App from "./App";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-const container = document.getElementById("root")!;
-const root = createRoot(container);
-root.render(<App />);
+html, body, #root {
+  height: 100%;
+}
