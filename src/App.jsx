@@ -1,50 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
-// ---------- Types ----------
-interface RosterRow {
-  personId: string;
-  fullName: string;
-  securityNumber: string; // e.g., 9A23, 10F12, SM1-7, SM2-23
-  currentGrade?: string;
-}
-interface DetectionRow {
-  slot: number;
-  securityNumber: string;
-  phonePresent: boolean;
-  presenceScore: number; // dark pixel ratio below Otsu threshold (0..1)
-  satScore: number;      // average saturation (0..1)
-  confidence: number;    // combined score (0..1)
-  color: string;         // coarse color label learned from this photo
-}
-type Status = "TURNED_IN" | "MISSING" | "UNASSIGNED" | "SUSPICIOUS";
-interface JoinedRow extends DetectionRow {
-  personId?: string;
-  fullName?: string;
-  currentGrade?: string;
-  status: Status;
-  expectedColor?: string | null; // saved baseline
-}
-interface DeviceProfile {
-  securityNumber: string;
-  color: string;
-  lastUpdated: string;
-}
-
-// ---------- Constants ----------
-const BOX_OPTIONS = ["A", "B", "C", "D", "E", "F", "SM1", "SM2"] as const;
-const GRADES = [9, 10, 11, 12] as const;
+const BOX_OPTIONS = ["A", "B", "C", "D", "E", "F", "SM1", "SM2"];
+const GRADES = [9, 10, 11, 12];
 const ROWS = 5;
 const COLS = 12;
 const LS_KEY = "deviceProfiles.v1";
 
-// ---------- Helpers ----------
-function buildSecurityNumber(grade: number, box: string, slot: number) {
-  const b = box.toUpperCase();
+function buildSecurityNumber(grade, box, slot) {
+  const b = String(box).toUpperCase();
   if (b === "SM1" || b === "SM2") return `${b}-${slot}`;
   return `${grade}${b}${slot}`;
 }
-function toCSV(rows: JoinedRow[]) {
+function toCSV(rows) {
   const header = [
     "Slot","Security Number","Full Name","Person ID","Current Grade",
     "Present","Presence Score","Saturation","Confidence","Detected Color","Expected Color","Status",
@@ -68,7 +36,7 @@ function toCSV(rows: JoinedRow[]) {
   }
   return lines.join("\n");
 }
-function downloadText(filename: string, mime: string, text: string) {
+function downloadText(filename, mime, text) {
   const blob = new Blob([text], { type: `${mime};charset=utf-8;` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -77,14 +45,13 @@ function downloadText(filename: string, mime: string, text: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
-function downloadCSV(filename: string, text: string) {
+function downloadCSV(filename, text) {
   downloadText(filename, "text/csv", text);
 }
-function downloadJSON(filename: string, obj: any) {
+function downloadJSON(filename, obj) {
   downloadText(filename, "application/json", JSON.stringify(obj, null, 2));
 }
-// Coarse HSV label (expects H in 0..180, S/V in 0..255)
-function colorLabelFromHSV(h: number, s255: number, v255: number): string {
+function colorLabelFromHSV(h, s255, v255) {
   if (isNaN(h) || isNaN(s255) || isNaN(v255)) return "unknown";
   if (s255 < 40 && v255 < 120) return "black";
   if (s255 < 40) return "gray";
@@ -95,8 +62,7 @@ function colorLabelFromHSV(h: number, s255: number, v255: number): string {
   if (h < 130) return "blue";
   return "purple";
 }
-// Otsu threshold (grayscale hist 0..255)
-function otsuThreshold(grayHist: number[], total: number) {
+function otsuThreshold(grayHist, total) {
   let sum = 0;
   for (let i = 0; i < 256; i++) sum += i * grayHist[i];
   let sumB = 0, wB = 0, maxVar = -1, threshold = 127;
@@ -113,51 +79,47 @@ function otsuThreshold(grayHist: number[], total: number) {
   }
   return threshold;
 }
-// Profiles
-function loadProfiles(): Record<string, DeviceProfile> {
+function loadProfiles() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return {};
-    const arr: DeviceProfile[] = JSON.parse(raw);
-    const map: Record<string, DeviceProfile> = {};
+    const arr = JSON.parse(raw);
+    const map = {};
     for (const p of arr) map[p.securityNumber.toUpperCase()] = p;
     return map;
   } catch {
     return {};
   }
 }
-function saveProfiles(map: Record<string, DeviceProfile>) {
+function saveProfiles(map) {
   const arr = Object.values(map).sort((a, b) => a.securityNumber.localeCompare(b.securityNumber));
   localStorage.setItem(LS_KEY, JSON.stringify(arr));
 }
 
-// ---------- Component ----------
 export default function App() {
-  const [roster, setRoster] = useState<RosterRow[]>([]);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  const [roster, setRoster] = useState([]);
+  const [rosterError, setRosterError] = useState(null);
 
-  const [grade, setGrade] = useState<number>(9);
-  const [box, setBox] = useState<string>("A");
+  const [grade, setGrade] = useState(9);
+  const [box, setBox] = useState("A");
 
-  // Crop & detection controls
   const [cropTop, setCropTop] = useState(9);
   const [cropLeft, setCropLeft] = useState(19);
   const [cropRight, setCropRight] = useState(83);
   const [cropBottom, setCropBottom] = useState(92);
-  // Presence decision: phone present if (darkRatio ≥ minDark) OR (avgSat ≥ minSat)
-  const [darkRatioMin, setDarkRatioMin] = useState(0.40); // 0..1
-  const [satMin, setSatMin] = useState(0.20);             // 0..1
+  const [darkRatioMin, setDarkRatioMin] = useState(0.40);
+  const [satMin, setSatMin] = useState(0.20);
 
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [results, setResults] = useState<JoinedRow[] | null>(null);
+  const [imageFile, setImageFile] = useState(null);
+  const [results, setResults] = useState(null);
 
-  const imgRef = useRef<HTMLImageElement | null>(null);
-  const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);    // hidden for processing
-  const overlayRef = useRef<HTMLCanvasElement | null>(null);       // visible overlay
+  const imgRef = useRef(null);
+  const scanCanvasRef = useRef(null);
+  const overlayRef = useRef(null);
 
-  const [profiles, setProfiles] = useState<Record<string, DeviceProfile>>({});
+  const [profiles, setProfiles] = useState({});
 
-  // -------- Load roster from PUBLIC_URL; show fallback uploader on failure --------
+  // Load roster from PUBLIC_URL (CRA) with manual upload fallback
   useEffect(() => {
     (async () => {
       try {
@@ -166,8 +128,8 @@ export default function App() {
         const buf = await res.arrayBuffer();
         const wb = XLSX.read(buf);
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
-        const normalized: RosterRow[] = json.map((r) => ({
+        const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        const normalized = json.map((r) => ({
           personId: String(r["Person ID"] ?? ""),
           fullName: String(r["Full Name"] ?? ""),
           securityNumber: String(r["Security Number"] ?? "").toUpperCase().trim(),
@@ -183,15 +145,14 @@ export default function App() {
     })();
   }, []);
 
-  // Manual roster upload fallback
-  const onRosterUpload = async (file: File | null) => {
+  const onRosterUpload = async (file) => {
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf);
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const json: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
-      const normalized: RosterRow[] = json.map((r) => ({
+      const json = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      const normalized = json.map((r) => ({
         personId: String(r["Person ID"] ?? ""),
         fullName: String(r["Full Name"] ?? ""),
         securityNumber: String(r["Security Number"] ?? "").toUpperCase().trim(),
@@ -200,11 +161,10 @@ export default function App() {
       setRoster(normalized);
       setRosterError(null);
     } catch {
-      setRosterError("Roster upload failed. Make sure columns are: Person ID, Full Name, Security Number, Current Grade.");
+      setRosterError("Roster upload failed. Columns must be: Person ID, Full Name, Security Number, Current Grade.");
     }
   };
 
-  // -------- Grid Overlay (visible) --------
   const drawOverlay = () => {
     const img = imgRef.current;
     const overlay = overlayRef.current;
@@ -235,12 +195,11 @@ export default function App() {
     const cellW = Math.floor((R - L) / COLS);
     const cellH = Math.floor((B - T) / ROWS);
 
-    const ix0 = (c: number) => Math.round(L + c * cellW + 0.18 * cellW);
-    const ix1 = (c: number) => Math.round(L + c * cellW + 0.82 * cellW);
-    const iy0 = (r: number) => Math.round(T + r * cellH + 0.18 * cellH);
-    const iy1 = (r: number) => Math.round(T + r * cellH + 0.86 * cellH);
+    const ix0 = (c) => Math.round(L + c * cellW + 0.18 * cellW);
+    const ix1 = (c) => Math.round(L + c * cellW + 0.82 * cellW);
+    const iy0 = (r) => Math.round(T + r * cellH + 0.18 * cellH);
+    const iy1 = (r) => Math.round(T + r * cellH + 0.86 * cellH);
 
-    // outer grid lines
     ctx.beginPath();
     for (let r = 1; r < ROWS; r++) {
       const y = T + r * cellH;
@@ -252,7 +211,6 @@ export default function App() {
     }
     ctx.stroke();
 
-    // inner dashed boxes + slot labels
     ctx.setLineDash([6, 4]);
     ctx.font = "12px sans-serif";
     ctx.fillStyle = "rgba(0,0,0,0.9)";
@@ -276,7 +234,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageFile, cropTop, cropLeft, cropRight, cropBottom]);
 
-  // --------- Core scan with Otsu + Saturation (hidden canvas) ---------
   const runScan = async () => {
     const img = imgRef.current;
     const canvas = scanCanvasRef.current;
@@ -297,11 +254,8 @@ export default function App() {
     const cellW = Math.floor((RR - L) / COLS);
     const cellH = Math.floor((B - T) / ROWS);
 
-    const rosterIndex = new Map<string, RosterRow>(
-      roster.map(r => [r.securityNumber.toUpperCase(), r])
-    );
-
-    const detections: DetectionRow[] = [];
+    const rosterIndex = new Map(roster.map(r => [r.securityNumber.toUpperCase(), r]));
+    const detections = [];
 
     for (let rr = 0; rr < ROWS; rr++) {
       for (let cc = 0; cc < COLS; cc++) {
@@ -362,13 +316,10 @@ export default function App() {
         const slot = rr * COLS + cc + 1;
         const sec = buildSecurityNumber(grade, box, slot);
 
-        const confidence = Math.max(
-          0,
-          Math.min(1,
-            0.6 * (darkRatioMin ? darkRatio / darkRatioMin : darkRatio) +
-            0.4 * (satMin ? avgS / satMin : avgS)
-          )
-        );
+        const confidence = Math.max(0, Math.min(1,
+          0.6 * (darkRatioMin ? darkRatio / darkRatioMin : darkRatio) +
+          0.4 * (satMin ? avgS / satMin : avgS)
+        ));
 
         detections.push({
           slot,
@@ -382,25 +333,21 @@ export default function App() {
       }
     }
 
-    // Join with roster & determine status (and use any prior baseline if present)
     const prior = profiles;
-    const joined: JoinedRow[] = detections.map((d) => {
+    const joined = detections.map((d) => {
       const ro = rosterIndex.get(d.securityNumber);
       const expected = prior[d.securityNumber]?.color ?? null;
-
-      let status: Status;
+      let status;
       if (!ro) status = "UNASSIGNED";
       else if (!d.phonePresent) status = "MISSING";
       else if (expected && d.color !== expected) status = "SUSPICIOUS";
       else status = "TURNED_IN";
-
       return { ...d, ...ro, expectedColor: expected, status };
     });
 
-    // Auto-learn baseline ONLY from this real photo for students without a baseline:
-    const updatedProfiles: Record<string, DeviceProfile> = { ...prior };
+    const updatedProfiles = { ...prior };
     for (const r of joined) {
-      if (r.fullName && r.phonePresent && !updatedProfiles[r.securityNumber]) {
+      if (r?.fullName && r.phonePresent && !updatedProfiles[r.securityNumber]) {
         updatedProfiles[r.securityNumber] = {
           securityNumber: r.securityNumber,
           color: r.color,
@@ -421,14 +368,13 @@ export default function App() {
     setResults(joined);
   };
 
-  // Export / Import baselines
   const exportProfiles = () => downloadJSON("device-profiles.json", Object.values(profiles));
-  const importProfiles = async (file: File | null) => {
+  const importProfiles = async (file) => {
     if (!file) return;
     try {
       const text = await file.text();
-      const arr: DeviceProfile[] = JSON.parse(text);
-      const map: Record<string, DeviceProfile> = { ...profiles };
+      const arr = JSON.parse(text);
+      const map = { ...profiles };
       for (const p of arr) {
         const key = (p.securityNumber || "").toUpperCase();
         if (!key) continue;
@@ -439,7 +385,7 @@ export default function App() {
       if (results) {
         const next = results.map(r => {
           const expected = map[r.securityNumber]?.color ?? null;
-          let status: Status = r.status;
+          let status = r.status;
           if (r.fullName && r.phonePresent && expected && r.color !== expected) status = "SUSPICIOUS";
           else if (r.fullName && r.phonePresent) status = "TURNED_IN";
           return { ...r, expectedColor: expected, status };
@@ -471,14 +417,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Roster uploader fallback */}
       <div className="flex flex-wrap items-center gap-3">
         <label className="px-3 py-1.5 rounded bg-gray-100 border cursor-pointer">
           Upload roster.xlsx
           <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => onRosterUpload(e.target.files?.[0] ?? null)} />
         </label>
 
-        {/* Profiles toolbar */}
         <button className="px-3 py-1.5 rounded bg-gray-100 border" onClick={exportProfiles}>Export Profiles</button>
         <label className="px-3 py-1.5 rounded bg-gray-100 border cursor-pointer">
           Import Profiles
@@ -486,9 +430,7 @@ export default function App() {
         </label>
       </div>
 
-      {/* Controls */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Left: Inputs */}
         <div className="space-y-3 p-4 rounded-2xl shadow bg-white">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -521,7 +463,6 @@ export default function App() {
             />
           </div>
 
-          {/* Crop & detection tuning */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
             <label className="block text-xs">Crop Top %
               <input type="number" value={cropTop} onChange={(e) => setCropTop(parseFloat(e.target.value || "9"))} className="w-full border rounded px-2 py-1" />
@@ -539,16 +480,14 @@ export default function App() {
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs">Min Dark Ratio (Otsu)
-              <input
-                type="number" step="0.01" min={0} max={1}
+              <input type="number" step="0.01" min={0} max={1}
                 value={darkRatioMin}
                 onChange={(e) => setDarkRatioMin(Math.min(1, Math.max(0, parseFloat(e.target.value || "0.4"))))}
                 className="w-full border rounded px-2 py-1"
               />
             </label>
             <label className="block text-xs">Min Avg Saturation
-              <input
-                type="number" step="0.01" min={0} max={1}
+              <input type="number" step="0.01" min={0} max={1}
                 value={satMin}
                 onChange={(e) => setSatMin(Math.min(1, Math.max(0, parseFloat(e.target.value || "0.2"))))}
                 className="w-full border rounded px-2 py-1"
@@ -557,8 +496,7 @@ export default function App() {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button
-              className="px-4 py-2 rounded-xl bg-black text-white shadow"
+            <button className="px-4 py-2 rounded-xl bg-black text-white shadow"
               onClick={() => { runScan(); }}
               disabled={!imageFile || roster.length === 0}
             >
@@ -577,7 +515,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right: Preview + Grid Overlay */}
         <div className="space-y-3 p-4 rounded-2xl shadow bg-white">
           <div className="text-sm font-medium">Preview & Grid</div>
           <div className="relative border rounded-xl overflow-hidden">
@@ -609,7 +546,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Results */}
       {results && (
         <div className="p-4 rounded-2xl shadow bg-white">
           <div className="flex flex-wrap items-center gap-4 mb-3">
