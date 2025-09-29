@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: ["main"]
+    branches: [ main ]  # <- change to master if your default branch is master
   workflow_dispatch:
 
 permissions:
@@ -11,33 +11,31 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: "pages"
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      TSC_COMPILE_ON_ERROR: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node (use Node 18 for CRA 5)
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      # 🔧 Pin webpack validator deps that CRA 5 expects
-      - name: Install (pin schema-utils/ajv/ajv-keywords)
-        run: |
-          npm install --no-save schema-utils@3.3.0 ajv@6.12.6 ajv-keywords@3.5.2
-
-      - name: Install dependencies
+      # No lockfile required; avoids npm ci error
+      - name: Install deps
         run: npm install --legacy-peer-deps
 
       - name: Build
         run: npm run build
+
+      # React SPA fallback to avoid GitHub’s 404 page
+      - name: Add SPA 404 fallback
+        run: cp build/index.html build/404.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -45,10 +43,11 @@ jobs:
           path: build
 
   deploy:
-    needs: build
-    runs-on: ubuntu-latest
     environment:
       name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
